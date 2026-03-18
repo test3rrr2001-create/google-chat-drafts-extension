@@ -1,4 +1,4 @@
-console.log('[GList] content.js execution started.');
+console.log('[GList] sidebar mode content.js started.');
 
 (() => {
   'use strict';
@@ -6,15 +6,15 @@ console.log('[GList] content.js execution started.');
   const DEBUG = true;
   const log = (...args) => DEBUG && console.log('[GList]', ...args);
 
-  const CONTAINER_ID = 'gchat-draft-list-container';
-  const UPDATE_DEBOUNCE_MS = 200;
+  const SECTION_ID = 'gchat-draft-sidebar-section';
+  const UPDATE_DEBOUNCE_MS = 250;
 
   let updateTimer = null;
-  let isExpanded = false;
+  let isExpanded = true;
 
   function startExtension() {
     try {
-      log('Extension initialized. Version 1.6 (Compact Header Icon Mode)');
+      log('Extension initialized. Version 2.0 (Sidebar Mode)');
 
       function collectDraftItems() {
         const drafts = [];
@@ -43,7 +43,7 @@ console.log('[GList] content.js execution started.');
         const allIndicators = [...attrNodes, ...iconNodes, ...textNodes];
 
         for (const el of allIndicators) {
-          if (!el || el.closest(`#${CONTAINER_ID}`)) continue;
+          if (!el || el.closest(`#${SECTION_ID}`)) continue;
 
           const container = el.closest(
             '[role="listitem"], [role="treeitem"], [data-item-id], a[href*="/dm/"], a[href*="/space/"], a, [jscontroller]'
@@ -51,14 +51,18 @@ console.log('[GList] content.js execution started.');
 
           if (!container) continue;
 
-          let name = container.getAttribute('aria-label') || container.getAttribute('title') || '';
+          let name =
+            container.getAttribute('aria-label') ||
+            container.getAttribute('title') ||
+            '';
+
           name = name
             .replace(/下書き|Draft/gi, '')
             .replace(/未読メッセージ.*?件/g, '')
             .replace(/[\r\n]+/g, ' ')
             .trim();
 
-          if (!name || name.length > 50) {
+          if (!name || name.length > 60) {
             const spans = Array.from(container.querySelectorAll('span, div[dir="auto"]'));
             for (const span of spans) {
               const text = (span.textContent || '').trim();
@@ -66,6 +70,7 @@ console.log('[GList] content.js execution started.');
                 text &&
                 text !== '下書き' &&
                 text !== 'Draft' &&
+                text !== '[下書き]' &&
                 !/^\d{1,2}:\d{2}/.test(text)
               ) {
                 name = text;
@@ -78,7 +83,10 @@ console.log('[GList] content.js execution started.');
           name = name.trim();
 
           if (name && !seenNames.has(name)) {
-            drafts.push({ name, element: container });
+            drafts.push({
+              name,
+              element: container
+            });
             seenNames.add(name);
           }
         }
@@ -100,205 +108,261 @@ console.log('[GList] content.js execution started.');
         return svg;
       }
 
-      function renderUI(drafts) {
-        let container = document.getElementById(CONTAINER_ID);
-        if (!container) {
-          container = document.createElement('div');
-          container.id = CONTAINER_ID;
+      function createChevronSvg(expanded) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.classList.add('gchat-draft-chevron-svg');
+        if (expanded) svg.classList.add('expanded');
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z');
+        svg.appendChild(path);
+        return svg;
+      }
+
+      function createSection(drafts) {
+        let section = document.getElementById(SECTION_ID);
+        if (!section) {
+          section = document.createElement('section');
+          section.id = SECTION_ID;
+          section.setAttribute('data-gchat-draft-sidebar', 'true');
         } else {
-          container.innerHTML = '';
+          section.innerHTML = '';
         }
 
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'gchat-draft-icon-button';
-        button.setAttribute('aria-label', `下書き ${drafts.length}件`);
-        button.setAttribute('title', drafts.length > 0 ? `下書き ${drafts.length}件` : '下書きなし');
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'gchat-draft-sidebar-header';
 
-        if (isExpanded) button.classList.add('active');
+        const left = document.createElement('div');
+        left.className = 'gchat-draft-sidebar-header-left';
 
-        const icon = document.createElement('span');
-        icon.className = 'gchat-draft-icon';
-        icon.appendChild(createPencilSvg());
+        const iconWrap = document.createElement('span');
+        iconWrap.className = 'gchat-draft-sidebar-icon';
+        iconWrap.appendChild(createPencilSvg());
 
-        button.appendChild(icon);
+        const title = document.createElement('span');
+        title.className = 'gchat-draft-sidebar-title';
+        title.textContent = '下書き';
 
-        if (drafts.length > 0) {
-          const badge = document.createElement('span');
-          badge.className = 'gchat-draft-mini-badge';
-          badge.textContent = drafts.length > 9 ? '9+' : String(drafts.length);
-          button.appendChild(badge);
-        }
+        left.appendChild(iconWrap);
+        left.appendChild(title);
 
-        button.onclick = (e) => {
+        const right = document.createElement('div');
+        right.className = 'gchat-draft-sidebar-header-right';
+
+        const count = document.createElement('span');
+        count.className = 'gchat-draft-sidebar-count';
+        count.textContent = String(drafts.length);
+
+        const chevron = createChevronSvg(isExpanded);
+
+        right.appendChild(count);
+        right.appendChild(chevron);
+
+        header.appendChild(left);
+        header.appendChild(right);
+
+        header.onclick = (e) => {
           e.stopPropagation();
           isExpanded = !isExpanded;
           updateUI();
         };
 
-        container.appendChild(button);
+        section.appendChild(header);
 
-        const list = document.createElement('ul');
-        list.className = 'gchat-draft-expanded-list';
-        if (isExpanded) list.classList.add('visible');
+        const body = document.createElement('div');
+        body.className = 'gchat-draft-sidebar-body';
+        if (isExpanded) body.classList.add('expanded');
 
-        if (drafts.length > 0) {
-          for (const draft of drafts) {
-            const li = document.createElement('li');
-            li.className = 'gchat-draft-item';
-            li.textContent = draft.name;
-            li.onclick = (e) => {
-              e.stopPropagation();
-              const link = draft.element.querySelector('a') || draft.element;
-              link.click();
-            };
-            list.appendChild(li);
-          }
+        if (drafts.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'gchat-draft-empty';
+          empty.textContent = '未送信の下書きはありません';
+          body.appendChild(empty);
         } else {
-          const li = document.createElement('li');
-          li.className = 'gchat-draft-item empty';
-          li.textContent = '下書きはありません';
-          list.appendChild(li);
+          const list = document.createElement('ul');
+          list.className = 'gchat-draft-list';
+
+          for (const draft of drafts) {
+            const item = document.createElement('li');
+            item.className = 'gchat-draft-list-item';
+
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'gchat-draft-list-button';
+            button.title = draft.name;
+
+            const dot = document.createElement('span');
+            dot.className = 'gchat-draft-list-dot';
+
+            const label = document.createElement('span');
+            label.className = 'gchat-draft-list-label';
+            label.textContent = draft.name;
+
+            button.appendChild(dot);
+            button.appendChild(label);
+
+            button.onclick = (e) => {
+              e.stopPropagation();
+              const target = draft.element.querySelector('a') || draft.element;
+              target.click();
+            };
+
+            item.appendChild(button);
+            list.appendChild(item);
+          }
+
+          body.appendChild(list);
         }
 
-        container.appendChild(list);
-        return container;
+        section.appendChild(body);
+
+        return section;
       }
 
-      function getFlexDirection(element) {
-        if (!element) return 'row';
-        return window.getComputedStyle(element).flexDirection || 'row';
-      }
+      function looksLikeSidebarContainer(el) {
+        if (!el || !(el instanceof HTMLElement)) return false;
+        if (el.closest(`#${SECTION_ID}`)) return false;
 
-      function hardenHeaderLayout(referenceElement) {
-        const parent = referenceElement?.parentElement;
-        if (!parent) return;
-
-        const style = window.getComputedStyle(parent);
-        if (style.display.includes('flex')) {
-          parent.style.setProperty('flex-wrap', 'nowrap', 'important');
-          parent.style.setProperty('align-items', 'center', 'important');
-          parent.style.setProperty('column-gap', '0px', 'important');
-          parent.style.setProperty('row-gap', '0px', 'important');
-        }
-      }
-
-      function isSavedButton(el) {
-        if (!el) return false;
         const text = (el.textContent || '').trim();
-        const aria = el.getAttribute('aria-label') || '';
-        const tooltip = el.getAttribute('data-tooltip') || '';
-        return (
-          text.includes('後で見る') ||
-          text.includes('Saved') ||
-          aria.includes('後で見る') ||
-          aria.includes('Saved') ||
-          tooltip.includes('後で見る') ||
-          tooltip.includes('Saved')
-        );
-      }
+        const style = window.getComputedStyle(el);
 
-      function isActiveButton(el) {
-        if (!el) return false;
-        const text = (el.textContent || '').trim();
-        const aria = el.getAttribute('aria-label') || '';
-        return (
-          text.includes('アクティブ') ||
-          text.includes('Active') ||
-          aria.includes('アクティブ') ||
-          aria.includes('Active')
-        );
-      }
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        if (el.offsetWidth < 180 || el.offsetHeight < 120) return false;
 
-      function findTopBarInsertionPoint() {
-        const candidates = Array.from(
-          document.querySelectorAll('button, [role="button"], a, [data-tooltip]')
-        );
+        const signals = [
+          '[role="navigation"]',
+          '[aria-label*="Chat"]',
+          '[aria-label*="チャット"]',
+          '[aria-label*="Spaces"]',
+          '[aria-label*="スペース"]'
+        ];
 
-        const savedBtn = candidates.find(isSavedButton);
-        if (savedBtn) {
-          const parent = savedBtn.parentElement;
-          const direction = getFlexDirection(parent);
-          hardenHeaderLayout(savedBtn);
+        if (signals.some((sel) => el.matches(sel))) return true;
 
-          const position = direction === 'row-reverse' ? 'afterend' : 'beforebegin';
-          return { element: savedBtn, position, parent, reason: 'saved-button' };
+        if (
+          text.includes('ダイレクト メッセージ') ||
+          text.includes('スペース') ||
+          text.includes('Direct messages') ||
+          text.includes('Spaces') ||
+          text.includes('チャット')
+        ) {
+          return true;
         }
 
-        const activeBtn = candidates.find(isActiveButton);
-        if (activeBtn) {
-          const parent = activeBtn.parentElement;
-          const direction = getFlexDirection(parent);
-          hardenHeaderLayout(activeBtn);
+        return false;
+      }
 
-          const position = direction === 'row-reverse' ? 'afterend' : 'beforebegin';
-          return { element: activeBtn, position, parent, reason: 'active-button' };
+      function findSidebarInsertionPoint() {
+        const directCandidates = [
+          ...document.querySelectorAll('[role="navigation"]'),
+          ...document.querySelectorAll('[aria-label*="チャット"], [aria-label*="Chat"]'),
+          ...document.querySelectorAll('[aria-label*="ダイレクト"], [aria-label*="Direct"]'),
+          ...document.querySelectorAll('[aria-label*="スペース"], [aria-label*="Spaces"]')
+        ];
+
+        for (const candidate of directCandidates) {
+          if (looksLikeSidebarContainer(candidate)) {
+            return { type: 'prepend', element: candidate, reason: 'direct-sidebar' };
+          }
+
+          const parent = candidate.closest('div');
+          if (looksLikeSidebarContainer(parent)) {
+            return { type: 'prepend', element: parent, reason: 'direct-parent' };
+          }
         }
 
-        const topRight = document.querySelector('.GB_ie, .gb_ie, .X97S6e, [role="banner"] > div:last-child');
-        if (topRight) {
-          topRight.style.setProperty('flex-wrap', 'nowrap', 'important');
-          topRight.style.setProperty('align-items', 'center', 'important');
-          return { element: topRight, position: 'afterbegin', parent: topRight, reason: 'fallback-container' };
+        const treeItems = Array.from(document.querySelectorAll('[role="treeitem"], [role="listitem"]'));
+        for (const item of treeItems) {
+          const text = (item.textContent || '').trim();
+          if (
+            text.includes('ダイレクト メッセージ') ||
+            text.includes('スペース') ||
+            text.includes('Direct messages') ||
+            text.includes('Spaces')
+          ) {
+            let parent = item.parentElement;
+            for (let i = 0; i < 6 && parent; i += 1) {
+              if (parent.offsetWidth > 180 && parent.offsetHeight > 120) {
+                return { type: 'prepend', element: parent, reason: 'tree-nearby' };
+              }
+              parent = parent.parentElement;
+            }
+          }
+        }
+
+        const wideDivs = Array.from(document.querySelectorAll('div')).filter((div) => {
+          if (div.id === SECTION_ID) return false;
+          if (div.querySelector(`#${SECTION_ID}`)) return false;
+          if (div.offsetWidth < 180 || div.offsetWidth > 520) return false;
+          if (div.offsetHeight < 150) return false;
+
+          const text = (div.textContent || '').trim();
+          return (
+            text.includes('ダイレクト メッセージ') ||
+            text.includes('スペース') ||
+            text.includes('Direct messages') ||
+            text.includes('Spaces')
+          );
+        });
+
+        if (wideDivs.length > 0) {
+          wideDivs.sort((a, b) => b.offsetHeight - a.offsetHeight);
+          return { type: 'prepend', element: wideDivs[0], reason: 'wide-fallback' };
         }
 
         return null;
       }
 
-      function placeUi(target, ui) {
-        const existing = document.getElementById(CONTAINER_ID);
+      function placeSection(target, section) {
+        const existing = document.getElementById(SECTION_ID);
 
-        if (target.position === 'afterbegin') {
-          if (!ui.parentElement || ui.parentElement !== target.element || target.element.firstElementChild !== ui) {
-            target.element.insertAdjacentElement('afterbegin', ui);
+        if (target.type === 'prepend') {
+          if (
+            existing &&
+            existing.parentElement === target.element &&
+            target.element.firstElementChild === existing
+          ) {
+            return;
           }
+          target.element.insertAdjacentElement('afterbegin', section);
           return;
         }
 
-        if (
-          existing &&
-          existing.parentElement === target.element.parentElement
-        ) {
-          if (target.position === 'beforebegin' && existing.nextElementSibling === target.element) return;
-          if (target.position === 'afterend' && existing.previousElementSibling === target.element) return;
-        }
-
-        target.element.insertAdjacentElement(target.position, ui);
+        target.element.appendChild(section);
       }
 
       function updateUI() {
         const drafts = collectDraftItems();
-        const ui = renderUI(drafts);
-        const target = findTopBarInsertionPoint();
+        const section = createSection(drafts);
+        const target = findSidebarInsertionPoint();
 
-        if (target) {
-          placeUi(target, ui);
-          log('UI inserted into header.', target.reason, target.position);
+        if (!target) {
+          log('Sidebar insertion point not found yet.');
           return;
         }
 
-        ui.style.position = 'fixed';
-        ui.style.top = '12px';
-        ui.style.right = '180px';
-        ui.style.zIndex = '99999';
-
-        if (!document.getElementById(CONTAINER_ID)) {
-          document.body.appendChild(ui);
-        }
+        placeSection(target, section);
+        log('Sidebar section inserted.', target.reason, 'drafts=', drafts.length);
       }
 
-      function scheduledUpdate() {
+      function scheduleUpdate() {
         if (updateTimer) clearTimeout(updateTimer);
         updateTimer = setTimeout(updateUI, UPDATE_DEBOUNCE_MS);
       }
 
       const observer = new MutationObserver((mutations) => {
         const internal = mutations.some((m) => {
-          const target = m.target;
-          return target.id === CONTAINER_ID || (target.closest && target.closest(`#${CONTAINER_ID}`));
+          const node = m.target;
+          return (
+            node.id === SECTION_ID ||
+            (node.closest && node.closest(`#${SECTION_ID}`))
+          );
         });
 
-        if (!internal) scheduledUpdate();
+        if (!internal) scheduleUpdate();
       });
 
       if (document.body) {
@@ -311,13 +375,6 @@ console.log('[GList] content.js execution started.');
       }
 
       updateUI();
-
-      document.addEventListener('click', (e) => {
-        if (isExpanded && !e.target.closest(`#${CONTAINER_ID}`)) {
-          isExpanded = false;
-          updateUI();
-        }
-      });
     } catch (err) {
       console.error('[GList] CRITICAL ERROR:', err);
     }
