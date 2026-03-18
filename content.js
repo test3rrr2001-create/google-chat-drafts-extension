@@ -14,7 +14,7 @@ console.log('[GList] content.js execution started.');
 
   function startExtension() {
     try {
-      log('Extension initialized. Version 1.5 (Header Placement Hardening)');
+      log('Extension initialized. Version 1.6 (Compact Header Icon Mode)');
 
       function collectDraftItems() {
         const drafts = [];
@@ -89,6 +89,7 @@ console.log('[GList] content.js execution started.');
       function createPencilSvg() {
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
 
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute(
@@ -108,35 +109,34 @@ console.log('[GList] content.js execution started.');
           container.innerHTML = '';
         }
 
-        const summary = document.createElement('div');
-        summary.className = 'gchat-draft-summary-item';
-        if (isExpanded) summary.classList.add('active');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'gchat-draft-icon-button';
+        button.setAttribute('aria-label', `下書き ${drafts.length}件`);
+        button.setAttribute('title', drafts.length > 0 ? `下書き ${drafts.length}件` : '下書きなし');
+
+        if (isExpanded) button.classList.add('active');
 
         const icon = document.createElement('span');
-        icon.className = 'gchat-draft-summary-icon';
+        icon.className = 'gchat-draft-icon';
         icon.appendChild(createPencilSvg());
 
-        const text = document.createElement('span');
-        text.className = 'gchat-draft-summary-text';
-        text.textContent = '下書き';
-
-        summary.appendChild(icon);
-        summary.appendChild(text);
+        button.appendChild(icon);
 
         if (drafts.length > 0) {
           const badge = document.createElement('span');
-          badge.className = 'gchat-draft-badge';
-          badge.textContent = String(drafts.length);
-          summary.appendChild(badge);
+          badge.className = 'gchat-draft-mini-badge';
+          badge.textContent = drafts.length > 9 ? '9+' : String(drafts.length);
+          button.appendChild(badge);
         }
 
-        summary.onclick = (e) => {
+        button.onclick = (e) => {
           e.stopPropagation();
           isExpanded = !isExpanded;
           updateUI();
         };
 
-        container.appendChild(summary);
+        container.appendChild(button);
 
         const list = document.createElement('ul');
         list.className = 'gchat-draft-expanded-list';
@@ -179,6 +179,7 @@ console.log('[GList] content.js execution started.');
           parent.style.setProperty('flex-wrap', 'nowrap', 'important');
           parent.style.setProperty('align-items', 'center', 'important');
           parent.style.setProperty('column-gap', '0px', 'important');
+          parent.style.setProperty('row-gap', '0px', 'important');
         }
       }
 
@@ -213,8 +214,8 @@ console.log('[GList] content.js execution started.');
         const candidates = Array.from(
           document.querySelectorAll('button, [role="button"], a, [data-tooltip]')
         );
-        const savedBtn = candidates.find(isSavedButton);
 
+        const savedBtn = candidates.find(isSavedButton);
         if (savedBtn) {
           const parent = savedBtn.parentElement;
           const direction = getFlexDirection(parent);
@@ -246,7 +247,6 @@ console.log('[GList] content.js execution started.');
 
       function placeUi(target, ui) {
         const existing = document.getElementById(CONTAINER_ID);
-        const needsMove = !existing || existing !== ui;
 
         if (target.position === 'afterbegin') {
           if (!ui.parentElement || ui.parentElement !== target.element || target.element.firstElementChild !== ui) {
@@ -255,7 +255,10 @@ console.log('[GList] content.js execution started.');
           return;
         }
 
-        if (!needsMove && existing.parentElement === target.element.parentElement) {
+        if (
+          existing &&
+          existing.parentElement === target.element.parentElement
+        ) {
           if (target.position === 'beforebegin' && existing.nextElementSibling === target.element) return;
           if (target.position === 'afterend' && existing.previousElementSibling === target.element) return;
         }
@@ -276,8 +279,9 @@ console.log('[GList] content.js execution started.');
 
         ui.style.position = 'fixed';
         ui.style.top = '12px';
-        ui.style.right = '200px';
+        ui.style.right = '180px';
         ui.style.zIndex = '99999';
+
         if (!document.getElementById(CONTAINER_ID)) {
           document.body.appendChild(ui);
         }
