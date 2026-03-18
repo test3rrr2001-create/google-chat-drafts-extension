@@ -1,148 +1,141 @@
-/* ============================================================
-   Google Chat Draft List - Extension Styles
-   ============================================================ */
-
-/* ヘッダーの親 flex コンテナに入っても押し出されないように調整 */
 #gchat-draft-list-container {
   display: inline-flex !important;
-  position: relative;
-  align-items: center;
-  justify-content: center;
-  vertical-align: middle;
-  margin: 0 !important;
+  position: relative !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 4px 0 0 !important;
   padding: 0 !important;
-  z-index: 99;
+  z-index: 9999;
   font-family: 'Google Sans', Roboto, sans-serif;
-  flex: 0 0 auto !important;
+  flex: 0 0 32px !important;
+  width: 32px !important;
+  min-width: 32px !important;
+  max-width: 32px !important;
   flex-shrink: 0 !important;
-  min-width: 0;
-  max-width: max-content;
-  white-space: nowrap;
+  white-space: nowrap !important;
 
-  --draft-bg: rgba(0, 0, 0, 0.04);
+  --draft-btn-bg: rgba(60, 64, 67, 0.08);
+  --draft-btn-hover: rgba(60, 64, 67, 0.14);
+  --draft-btn-active: rgba(26, 115, 232, 0.16);
+  --draft-icon: #444746;
   --draft-accent: #1a73e8;
-  --draft-icon-color: #444746;
-  --draft-hover-bg: rgba(0, 0, 0, 0.08);
-  --draft-text-primary: #1f1f1f;
-  --draft-text-secondary: #444746;
-  --draft-badge-bg: #b3261e;
+  --draft-badge-bg: #d93025;
   --draft-badge-text: #ffffff;
-  --draft-border: transparent;
-  --draft-shadow: none;
   --draft-list-bg: #ffffff;
-  --draft-list-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  --draft-list-border: rgba(0, 0, 0, 0.1);
+  --draft-list-border: rgba(0, 0, 0, 0.12);
+  --draft-list-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  --draft-text: #202124;
+  --draft-subtle: #5f6368;
 }
 
 [data-theme='dark'] #gchat-draft-list-container {
-  --draft-bg: rgba(255, 255, 255, 0.1);
-  --draft-hover-bg: rgba(255, 255, 255, 0.15);
-  --draft-text-primary: #e3e3e3;
-  --draft-text-secondary: #c4c7c5;
-  --draft-icon-color: #c4c7c5;
+  --draft-btn-bg: rgba(255, 255, 255, 0.10);
+  --draft-btn-hover: rgba(255, 255, 255, 0.16);
+  --draft-btn-active: rgba(138, 180, 248, 0.20);
+  --draft-icon: #e8eaed;
   --draft-list-bg: #202124;
-  --draft-list-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --draft-list-border: rgba(255, 255, 255, 0.1);
+  --draft-list-border: rgba(255, 255, 255, 0.10);
+  --draft-list-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --draft-text: #e8eaed;
+  --draft-subtle: #bdc1c6;
 }
 
 @media (prefers-color-scheme: dark) {
   #gchat-draft-list-container {
-    --draft-bg: rgba(255, 255, 255, 0.1);
-    --draft-hover-bg: rgba(255, 255, 255, 0.15);
-    --draft-text-primary: #e3e3e3;
-    --draft-text-secondary: #c4c7c5;
-    --draft-icon-color: #c4c7c5;
+    --draft-btn-bg: rgba(255, 255, 255, 0.10);
+    --draft-btn-hover: rgba(255, 255, 255, 0.16);
+    --draft-btn-active: rgba(138, 180, 248, 0.20);
+    --draft-icon: #e8eaed;
     --draft-list-bg: #202124;
-    --draft-list-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-    --draft-list-border: rgba(255, 255, 255, 0.1);
+    --draft-list-border: rgba(255, 255, 255, 0.10);
+    --draft-list-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    --draft-text: #e8eaed;
+    --draft-subtle: #bdc1c6;
   }
 }
 
-.gchat-draft-summary-item {
+.gchat-draft-icon-button {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  max-width: 32px;
+  border: none;
+  outline: none;
+  border-radius: 999px;
+  padding: 0;
+  margin: 0;
+  background: var(--draft-btn-bg);
+  color: var(--draft-icon);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 32px;
-  padding: 0 12px;
-  margin: 0 !important;
-  background-color: var(--draft-bg);
-  border: 1px solid var(--draft-border);
-  border-radius: 16px;
-  box-shadow: var(--draft-shadow);
   cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-  color: var(--draft-text-primary);
-  white-space: nowrap;
-  flex: 0 0 auto;
+  box-sizing: border-box;
+  flex: 0 0 32px;
 }
 
-.gchat-draft-summary-item:hover {
-  background-color: var(--draft-hover-bg);
+.gchat-draft-icon-button:hover {
+  background: var(--draft-btn-hover);
 }
 
-.gchat-draft-summary-item.active {
-  background-color: rgba(26, 115, 232, 0.12);
-  color: var(--draft-accent);
+.gchat-draft-icon-button.active {
+  background: var(--draft-btn-active);
 }
 
-.gchat-draft-summary-icon {
-  display: flex;
+.gchat-draft-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-right: 8px;
-  color: var(--draft-icon-color);
-  flex: 0 0 auto;
+  pointer-events: none;
 }
 
-.gchat-draft-summary-icon svg {
+.gchat-draft-icon svg {
   width: 18px;
   height: 18px;
   fill: currentColor;
 }
 
-.gchat-draft-summary-text {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.gchat-draft-badge {
-  background-color: var(--draft-badge-bg);
+.gchat-draft-mini-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--draft-badge-bg);
   color: var(--draft-badge-text);
-  font-size: 12px;
-  font-weight: 600;
-  min-width: 20px;
-  height: 20px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-  margin-left: 8px;
-  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 .gchat-draft-expanded-list {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   margin: 0;
-  padding: 8px 0;
+  padding: 6px 0;
   list-style: none;
-  background-color: var(--draft-list-bg);
+  background: var(--draft-list-bg);
   border: 1px solid var(--draft-list-border);
   border-radius: 12px;
   box-shadow: var(--draft-list-shadow);
-  min-width: 240px;
+  min-width: 220px;
   max-width: 320px;
-  max-height: 400px;
+  max-height: 360px;
   overflow-y: auto;
   opacity: 0;
-  transform: translateY(-10px);
+  transform: translateY(-8px);
   pointer-events: none;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  transition: all 0.18s ease;
+  z-index: 10000;
 }
 
 .gchat-draft-expanded-list.visible {
@@ -152,9 +145,9 @@
 }
 
 .gchat-draft-item {
-  padding: 10px 16px;
-  font-size: 14px;
-  color: var(--draft-text-primary);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--draft-text);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -169,23 +162,23 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: var(--draft-accent);
+  background: var(--draft-accent);
   margin-right: 10px;
   flex-shrink: 0;
 }
 
 .gchat-draft-item:hover {
-  background-color: var(--draft-hover-bg);
+  background: rgba(26, 115, 232, 0.08);
 }
 
 .gchat-draft-item.empty {
-  color: var(--draft-text-secondary);
+  color: var(--draft-subtle);
   cursor: default;
   font-style: italic;
 }
 
 .gchat-draft-item.empty:hover {
-  background-color: transparent;
+  background: transparent;
 }
 
 .gchat-draft-item.empty::before {
@@ -201,6 +194,6 @@
 }
 
 .gchat-draft-expanded-list::-webkit-scrollbar-thumb {
-  background-color: rgba(100, 100, 100, 0.3);
+  background: rgba(100, 100, 100, 0.28);
   border-radius: 4px;
 }
