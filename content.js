@@ -7,7 +7,7 @@ console.log('[GList] personal-section mode content.js started.');
   const log = (...args) => DEBUG && console.log('[GList]', ...args);
 
   const SECTION_ID = 'gchat-draft-personal-section';
-  const CACHE_KEY = 'gchatDraftCacheV2';
+  const CACHE_KEY = 'gchatDraftCacheV3';
   const ENABLED_KEY = 'gchatDraftFeatureEnabledV1';
   const CACHE_TTL_MS = 30 * 60 * 1000;
   const UPDATE_DEBOUNCE_MS = 300;
@@ -19,13 +19,14 @@ console.log('[GList] personal-section mode content.js started.');
 
   function startExtension() {
     try {
-      log('Extension initialized. Version 3.0 (Personal Section Top + Toggle)');
+      log('Extension initialized. Version 3.1 (Better Identity + Navigation)');
 
       function normalizeName(name) {
         return (name || '')
           .replace(/下書き|Draft/gi, '')
           .replace(/未読メッセージ.*?件/g, '')
           .replace(/[\r\n]+/g, ' ')
+          .replace(/\s+/g, ' ')
           .trim();
       }
 
@@ -98,11 +99,7 @@ console.log('[GList] personal-section mode content.js started.');
 
       async function loadFeatureEnabled() {
         const stored = await storageGet(ENABLED_KEY);
-        if (typeof stored === 'boolean') {
-          featureEnabled = stored;
-        } else {
-          featureEnabled = true;
-        }
+        featureEnabled = typeof stored === 'boolean' ? stored : true;
       }
 
       async function setFeatureEnabled(value) {
@@ -110,9 +107,145 @@ console.log('[GList] personal-section mode content.js started.');
         await storageSet(ENABLED_KEY, featureEnabled);
       }
 
+      function inferKindFromElement(el) {
+        if (!el) return 'unknown';
+
+        const href =
+          el.getAttribute?.('href') ||
+          el.querySelector?.('a[href]')?.getAttribute('href') ||
+          '';
+
+        const itemId =
+          el.getAttribute?.('data-item-id') ||
+          el.closest?.('[data-item-id]')?.getAttribute('data-item-id') ||
+          '';
+
+        const blob = `${href} ${itemId}`.toLowerCase();
+
+        if (blob.includes('/dm/') || blob.includes('dm:')) return 'dm';
+        if (
+          blob.includes('/space/') ||
+          blob.includes('/room/') ||
+          blob.includes('/spaces/') ||
+          blob.includes('space:')
+        ) {
+          return 'space';
+        }
+
+        return 'unknown';
+      }
+
+      function extractHref(container) {
+        if (!container) return '';
+
+        const directHref = container.getAttribute?.('href');
+        if (directHref) return directHref;
+
+        const anchor = container.querySelector?.('a[href]');
+        if (anchor) return anchor.getAttribute('href') || '';
+
+        const closestAnchor = container.closest?.('a[href]');
+        if (closestAnchor) return closestAnchor.getAttribute('href') || '';
+
+        return '';
+      }
+
+      function extractItemId(container) {
+        if (!container) return '';
+
+        return (
+          container.getAttribute?.('data-item-id') ||
+          container.closest?.('[data-item-id]')?.getAttribute('data-item-id') ||
+          ''
+        );
+      }
+
+      function scoreNameCandidate(text) {
+        if (!text) return -1;
+        if (text.length > 80) return 1;
+        if (text === '下書き' || text === 'Draft' || text === '[下書き]') return -1;
+        if (/^\d{1,2}:\d{2}/.test(text)) return -1;
+        if (/^\d+$/.test(text)) return -1;
+        if (text.includes('未読') || text.includes('メッセージ')) return -1;
+        return Math.min(100, text.length);
+      }
+
+      function extractBestName(container) {
+        if (!container) return '';
+
+        const candidates = [];
+
+        const pushCandidate = (value, source) => {
+          const normalized = normalizeName(value);
+          if (!normalized) return;
+          const score = scoreNameCandidate(normalized);
+          if (score < 0) return;
+          candidates.push({ value: normalized, score, source });
+        };
+
+        pushCandidate(container.getAttribute('aria-label'), 'container-aria');
+        pushCandidate(container.getAttribute('title'), 'container-title');
+
+        const anchor = container.querySelector('a[href]');
+        if (anchor) {
+          pushCandidate(anchor.getAttribute('aria-label'), 'anchor-aria');
+          pushCandidate(anchor.getAttribute('title'), 'anchor-title');
+          pushCandidate(textOf(anchor), 'anchor-text');
+        }
+
+        const richNodes = Array.from(
+          container.querySelectorAll('span, div[dir="auto"], div[role="gridcell"], div')
+        );
+
+        for (const node of richNodes) {
+          pushCandidate(node.getAttribute?.('aria-label'), 'node-aria');
+          pushCandidate(node.getAttribute?.('title'), 'node-title');
+          if (node.children.length === 0) {
+            pushCandidate(textOf(node), 'leaf-text');
+          }
+        }
+
+        pushCandidate(textOf(container), 'container-text');
+
+        candidates.sort((a, b) => b.score - a.score);
+
+        if (DEBUG && candidates.length > 0) {
+          log('Name candidates:', candidates.slice(0, 5));
+        }
+
+        return candidates[0]?.value || '';
+      }
+
+      function extractAriaLabel(container) {
+        if (!container) return '';
+        return (
+          container.getAttribute('aria-label') ||
+          container.querySelector('a[href]')?.getAttribute('aria-label') ||
+          ''
+        );
+      }
+
+      function buildDraftRecord(container) {
+        const name = extractBestName(container) || 'Unknown Chat';
+        const href = extractHref(container);
+        const itemId = extractItemId(container);
+        const ariaLabel = extractAriaLabel(container);
+        const kind = inferKindFromElement(container);
+
+        return {
+          name,
+          href,
+          itemId,
+          ariaLabel,
+          kind,
+          element: container,
+          cached: false
+        };
+      }
+
       function collectDraftItems() {
         const drafts = [];
-        const seenNames = new Set();
+        const seenKeys = new Set();
 
         const attrNodes = Array.from(
           document.querySelectorAll(
@@ -140,46 +273,35 @@ console.log('[GList] personal-section mode content.js started.');
           if (!el || el.closest(`#${SECTION_ID}`)) continue;
 
           const container = el.closest(
-            '[role="listitem"], [role="treeitem"], [data-item-id], a[href*="/dm/"], a[href*="/space/"], a, [jscontroller]'
+            '[role="listitem"], [role="treeitem"], [data-item-id], a[href], [jscontroller]'
           );
 
           if (!container) continue;
 
-          let name =
-            container.getAttribute('aria-label') ||
-            container.getAttribute('title') ||
-            '';
+          const draft = buildDraftRecord(container);
 
-          name = normalizeName(name);
+          const key =
+            draft.href ||
+            draft.itemId ||
+            `${draft.kind}:${draft.ariaLabel || draft.name}`;
 
-          if (!name || name.length > 60) {
-            const spans = Array.from(container.querySelectorAll('span, div[dir="auto"]'));
-            for (const span of spans) {
-              const text = textOf(span);
-              if (
-                text &&
-                text !== '下書き' &&
-                text !== 'Draft' &&
-                text !== '[下書き]' &&
-                !/^\d{1,2}:\d{2}/.test(text)
-              ) {
-                name = normalizeName(text);
-                break;
-              }
-            }
+          if (!seenKeys.has(key)) {
+            drafts.push(draft);
+            seenKeys.add(key);
           }
+        }
 
-          if (!name) name = 'Unknown Chat';
-          name = name.trim();
-
-          if (name && !seenNames.has(name)) {
-            drafts.push({
-              name,
-              element: container,
-              cached: false
-            });
-            seenNames.add(name);
-          }
+        if (DEBUG) {
+          log(
+            'Collected drafts:',
+            drafts.map((d) => ({
+              name: d.name,
+              href: d.href,
+              itemId: d.itemId,
+              kind: d.kind,
+              ariaLabel: d.ariaLabel
+            }))
+          );
         }
 
         return drafts;
@@ -188,7 +310,13 @@ console.log('[GList] personal-section mode content.js started.');
       function makeCachePayload(drafts) {
         return {
           savedAt: Date.now(),
-          items: drafts.map((d) => ({ name: d.name }))
+          items: drafts.map((d) => ({
+            name: d.name,
+            href: d.href,
+            itemId: d.itemId,
+            ariaLabel: d.ariaLabel,
+            kind: d.kind
+          }))
         };
       }
 
@@ -201,7 +329,11 @@ console.log('[GList] personal-section mode content.js started.');
 
         return payload.items
           .map((item) => ({
-            name: item.name,
+            name: item.name || 'Unknown Chat',
+            href: item.href || '',
+            itemId: item.itemId || '',
+            ariaLabel: item.ariaLabel || '',
+            kind: item.kind || 'unknown',
             element: null,
             cached: true
           }))
@@ -212,27 +344,57 @@ console.log('[GList] personal-section mode content.js started.');
         const merged = [];
         const seen = new Set();
 
-        for (const draft of liveDrafts) {
-          if (!seen.has(draft.name)) {
-            merged.push(draft);
-            seen.add(draft.name);
+        const keyOf = (d) =>
+          d.href || d.itemId || `${d.kind}:${d.ariaLabel || d.name}`;
+
+        for (const d of liveDrafts) {
+          const key = keyOf(d);
+          if (!seen.has(key)) {
+            merged.push(d);
+            seen.add(key);
           }
         }
 
-        for (const draft of cachedDrafts) {
-          if (!seen.has(draft.name)) {
-            merged.push(draft);
-            seen.add(draft.name);
+        for (const d of cachedDrafts) {
+          const key = keyOf(d);
+          if (!seen.has(key)) {
+            merged.push(d);
+            seen.add(key);
           }
         }
 
         return merged;
       }
 
-      function findLiveChatByName(name) {
+      function clickElement(el) {
+        if (!el) return false;
+        const clickable = el.matches?.('a, button') ? el : el.querySelector?.('a, button') || el;
+        clickable.click?.();
+        return true;
+      }
+
+      function findByHref(href) {
+        if (!href) return null;
+
+        const exact = document.querySelector(`a[href="${CSS.escape(href)}"]`);
+        if (exact) return exact;
+
+        const anchors = Array.from(document.querySelectorAll('a[href]'));
+        return anchors.find((a) => (a.getAttribute('href') || '').includes(href)) || null;
+      }
+
+      function findByItemId(itemId) {
+        if (!itemId) return null;
+        return document.querySelector(`[data-item-id="${CSS.escape(itemId)}"]`);
+      }
+
+      function findByAriaOrName(ariaLabel, name) {
         const candidates = Array.from(
-          document.querySelectorAll('[role="listitem"], [role="treeitem"], a[href*="/dm/"], a[href*="/space/"], [data-item-id]')
+          document.querySelectorAll('[role="listitem"], [role="treeitem"], a[href], [data-item-id]')
         );
+
+        const targetName = normalizeName(name);
+        const targetAria = normalizeName(ariaLabel);
 
         return (
           candidates.find((el) => {
@@ -241,9 +403,30 @@ console.log('[GList] personal-section mode content.js started.');
               el.getAttribute('title') ||
               textOf(el)
             );
-            return label && label.includes(name);
+
+            if (!label) return false;
+            if (targetAria && label.includes(targetAria)) return true;
+            if (targetName && label.includes(targetName)) return true;
+            return false;
           }) || null
         );
+      }
+
+      function resolveDraftTarget(draft) {
+        if (draft.element && document.contains(draft.element)) {
+          return draft.element;
+        }
+
+        const byHref = findByHref(draft.href);
+        if (byHref) return byHref;
+
+        const byItemId = findByItemId(draft.itemId);
+        if (byItemId) return byItemId;
+
+        const byLabel = findByAriaOrName(draft.ariaLabel, draft.name);
+        if (byLabel) return byLabel;
+
+        return null;
       }
 
       function isPersonalHeading(text) {
@@ -266,10 +449,7 @@ console.log('[GList] personal-section mode content.js started.');
           const parentText = textOf(parent);
           const width = parent.offsetWidth;
 
-          if (
-            width >= 160 &&
-            parentText.includes(textOf(heading))
-          ) {
+          if (width >= 160 && parentText.includes(textOf(heading))) {
             current = parent;
           } else {
             break;
@@ -444,14 +624,15 @@ console.log('[GList] personal-section mode content.js started.');
               button.onclick = (e) => {
                 e.stopPropagation();
 
-                const target = draft.element || findLiveChatByName(draft.name);
+                const target = resolveDraftTarget(draft);
                 if (target) {
-                  const clickable = target.querySelector('a') || target;
-                  clickable.click();
+                  clickElement(target);
                   return;
                 }
 
-                alert('保存済み下書きはありますが、現在の画面上で対象チャットを見つけられませんでした。');
+                alert(
+                  `対象チャットを見つけられませんでした。\n\nname: ${draft.name}\nhref: ${draft.href || '(none)'}\nitemId: ${draft.itemId || '(none)'}`
+                );
               };
 
               li.appendChild(button);
@@ -521,7 +702,16 @@ console.log('[GList] personal-section mode content.js started.');
           }
 
           placeSection(target, section);
-          log('Section inserted:', target.reason, 'drafts=', drafts.length, 'enabled=', featureEnabled);
+          log(
+            'Section inserted:',
+            target.reason,
+            'live=',
+            liveDrafts.length,
+            'cached=',
+            cachedDrafts.length,
+            'enabled=',
+            featureEnabled
+          );
         } catch (err) {
           console.error('[GList] updateUI failed:', err);
         } finally {
@@ -553,7 +743,7 @@ console.log('[GList] personal-section mode content.js started.');
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['aria-label', 'title', 'class']
+          attributeFilter: ['aria-label', 'title', 'class', 'href', 'data-item-id']
         });
       }
 
