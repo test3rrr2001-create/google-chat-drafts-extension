@@ -7,91 +7,24 @@ console.log('[GList] sidebar mode content.js started.');
   const log = (...args) => DEBUG && console.log('[GList]', ...args);
 
   const SECTION_ID = 'gchat-draft-sidebar-section';
-  const UPDATE_DEBOUNCE_MS = 250;
+  const CACHE_KEY = 'gchatDraftCacheV1';
+  const CACHE_TTL_MS = 30 * 60 * 1000;
+  const UPDATE_DEBOUNCE_MS = 300;
 
   let updateTimer = null;
   let isExpanded = true;
+  let isUpdating = false;
 
   function startExtension() {
     try {
-      log('Extension initialized. Version 2.0 (Sidebar Mode)');
+      log('Extension initialized. Version 2.1 (Shortcuts + Cache)');
 
-      function collectDraftItems() {
-        const drafts = [];
-        const seenNames = new Set();
-
-        const attrNodes = Array.from(
-          document.querySelectorAll(
-            '[aria-label*="下書き"], [aria-label*="Draft"], [title*="下書き"], [title*="Draft"]'
-          )
-        );
-
-        const pathNodes = Array.from(document.querySelectorAll('svg path'));
-        const iconNodes = pathNodes
-          .filter((p) => {
-            const d = p.getAttribute('d') || '';
-            return d.includes('17.25V21h3.75') || d.includes('M3 17.25');
-          })
-          .map((p) => p.closest('svg'));
-
-        const textNodes = Array.from(document.querySelectorAll('span, div')).filter((el) => {
-          if (el.children.length > 0) return false;
-          const text = (el.textContent || '').trim();
-          return text === '下書き' || text === 'Draft' || text === '[下書き]';
-        });
-
-        const allIndicators = [...attrNodes, ...iconNodes, ...textNodes];
-
-        for (const el of allIndicators) {
-          if (!el || el.closest(`#${SECTION_ID}`)) continue;
-
-          const container = el.closest(
-            '[role="listitem"], [role="treeitem"], [data-item-id], a[href*="/dm/"], a[href*="/space/"], a, [jscontroller]'
-          );
-
-          if (!container) continue;
-
-          let name =
-            container.getAttribute('aria-label') ||
-            container.getAttribute('title') ||
-            '';
-
-          name = name
-            .replace(/下書き|Draft/gi, '')
-            .replace(/未読メッセージ.*?件/g, '')
-            .replace(/[\r\n]+/g, ' ')
-            .trim();
-
-          if (!name || name.length > 60) {
-            const spans = Array.from(container.querySelectorAll('span, div[dir="auto"]'));
-            for (const span of spans) {
-              const text = (span.textContent || '').trim();
-              if (
-                text &&
-                text !== '下書き' &&
-                text !== 'Draft' &&
-                text !== '[下書き]' &&
-                !/^\d{1,2}:\d{2}/.test(text)
-              ) {
-                name = text;
-                break;
-              }
-            }
-          }
-
-          if (!name) name = 'Unknown Chat';
-          name = name.trim();
-
-          if (name && !seenNames.has(name)) {
-            drafts.push({
-              name,
-              element: container
-            });
-            seenNames.add(name);
-          }
-        }
-
-        return drafts;
+      function normalizeName(name) {
+        return (name || '')
+          .replace(/下書き|Draft/gi, '')
+          .replace(/未読メッセージ.*?件/g, '')
+          .replace(/[\r\n]+/g, ' ')
+          .trim();
       }
 
       function createPencilSvg() {
@@ -121,7 +54,191 @@ console.log('[GList] sidebar mode content.js started.');
         return svg;
       }
 
-      function createSection(drafts) {
+      function textOf(el) {
+        return (el?.textContent || '').trim();
+      }
+
+      function isShortcutHeadingText(text) {
+        return text === 'ショートカット' || text === 'Shortcuts';
+      }
+
+      function collectDraftItems() {
+        const drafts = [];
+        const seenNames = new Set();
+
+        const attrNodes = Array.from(
+          document.querySelectorAll(
+            '[aria-label*="下書き"], [aria-label*="Draft"], [title*="下書き"], [title*="Draft"]'
+          )
+        );
+
+        const pathNodes = Array.from(document.querySelectorAll('svg path'));
+        const iconNodes = pathNodes
+          .filter((p) => {
+            const d = p.getAttribute('d') || '';
+            return d.includes('17.25V21h3.75') || d.includes('M3 17.25');
+          })
+          .map((p) => p.closest('svg'));
+
+        const textNodes = Array.from(document.querySelectorAll('span, div')).filter((el) => {
+          if (el.children.length > 0) return false;
+          const text = textOf(el);
+          return text === '下書き' || text === 'Draft' || text === '[下書き]';
+        });
+
+        const allIndicators = [...attrNodes, ...iconNodes, ...textNodes];
+
+        for (const el of allIndicators) {
+          if (!el || el.closest(`#${SECTION_ID}`)) continue;
+
+          const container = el.closest(
+            '[role="listitem"], [role="treeitem"], [data-item-id], a[href*="/dm/"], a[href*="/space/"], a, [jscontroller]'
+          );
+
+          if (!container) continue;
+
+          let name =
+            container.getAttribute('aria-label') ||
+            container.getAttribute('title') ||
+            '';
+
+          name = normalizeName(name);
+
+          if (!name || name.length > 60) {
+            const spans = Array.from(container.querySelectorAll('span, div[dir="auto"]'));
+            for (const span of spans) {
+              const text = textOf(span);
+              if (
+                text &&
+                text !== '下書き' &&
+                text !== 'Draft' &&
+                text !== '[下書き]' &&
+                !/^\d{1,2}:\d{2}/.test(text)
+              ) {
+                name = normalizeName(text);
+                break;
+              }
+            }
+          }
+
+          if (!name) name = 'Unknown Chat';
+          name = name.trim();
+
+          if (name && !seenNames.has(name)) {
+            drafts.push({
+              name,
+              element: container,
+              cached: false
+            });
+            seenNames.add(name);
+          }
+        }
+
+        return drafts;
+      }
+
+      async function storageGet(key) {
+        try {
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            return await new Promise((resolve) => {
+              chrome.storage.local.get([key], (result) => resolve(result?.[key]));
+            });
+          }
+        } catch (err) {
+          log('chrome.storage get failed, fallback to localStorage', err);
+        }
+
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+
+      async function storageSet(key, value) {
+        try {
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            await new Promise((resolve) => {
+              chrome.storage.local.set({ [key]: value }, () => resolve());
+            });
+            return;
+          }
+        } catch (err) {
+          log('chrome.storage set failed, fallback to localStorage', err);
+        }
+
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (err) {
+          log('localStorage set failed', err);
+        }
+      }
+
+      function makeCachePayload(drafts) {
+        return {
+          savedAt: Date.now(),
+          items: drafts.map((d) => ({
+            name: d.name
+          }))
+        };
+      }
+
+      async function loadCachedDrafts() {
+        const payload = await storageGet(CACHE_KEY);
+        if (!payload || !Array.isArray(payload.items) || !payload.savedAt) return [];
+
+        const age = Date.now() - payload.savedAt;
+        if (age > CACHE_TTL_MS) return [];
+
+        return payload.items
+          .map((item) => ({
+            name: item.name,
+            cached: true,
+            element: null
+          }))
+          .filter((item) => item.name);
+      }
+
+      function mergeDrafts(liveDrafts, cachedDrafts) {
+        const merged = [];
+        const seen = new Set();
+
+        for (const item of liveDrafts) {
+          if (!seen.has(item.name)) {
+            merged.push(item);
+            seen.add(item.name);
+          }
+        }
+
+        for (const item of cachedDrafts) {
+          if (!seen.has(item.name)) {
+            merged.push(item);
+            seen.add(item.name);
+          }
+        }
+
+        return merged;
+      }
+
+      function findLiveChatByName(name) {
+        const candidates = Array.from(
+          document.querySelectorAll('[role="listitem"], [role="treeitem"], a[href*="/dm/"], a[href*="/space/"], [data-item-id]')
+        );
+
+        return (
+          candidates.find((el) => {
+            const label = normalizeName(
+              el.getAttribute('aria-label') ||
+                el.getAttribute('title') ||
+                textOf(el)
+            );
+            return label && label.includes(name);
+          }) || null
+        );
+      }
+
+      function createSection(drafts, meta = {}) {
         let section = document.getElementById(SECTION_ID);
         if (!section) {
           section = document.createElement('section');
@@ -167,7 +284,7 @@ console.log('[GList] sidebar mode content.js started.');
         header.onclick = (e) => {
           e.stopPropagation();
           isExpanded = !isExpanded;
-          updateUI();
+          scheduleUpdate();
         };
 
         section.appendChild(header);
@@ -175,6 +292,13 @@ console.log('[GList] sidebar mode content.js started.');
         const body = document.createElement('div');
         body.className = 'gchat-draft-sidebar-body';
         if (isExpanded) body.classList.add('expanded');
+
+        if (meta.usingCache) {
+          const note = document.createElement('div');
+          note.className = 'gchat-draft-cache-note';
+          note.textContent = '保存済みの下書きを表示中';
+          body.appendChild(note);
+        }
 
         if (drafts.length === 0) {
           const empty = document.createElement('div');
@@ -192,7 +316,7 @@ console.log('[GList] sidebar mode content.js started.');
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'gchat-draft-list-button';
-            button.title = draft.name;
+            button.title = draft.cached ? `${draft.name}（保存済み）` : draft.name;
 
             const dot = document.createElement('span');
             dot.className = 'gchat-draft-list-dot';
@@ -204,10 +328,27 @@ console.log('[GList] sidebar mode content.js started.');
             button.appendChild(dot);
             button.appendChild(label);
 
+            if (draft.cached) {
+              const tag = document.createElement('span');
+              tag.className = 'gchat-draft-cached-tag';
+              tag.textContent = '保存';
+              button.appendChild(tag);
+            }
+
             button.onclick = (e) => {
               e.stopPropagation();
-              const target = draft.element.querySelector('a') || draft.element;
-              target.click();
+
+              const target =
+                draft.element ||
+                findLiveChatByName(draft.name);
+
+              if (target) {
+                const clickable = target.querySelector('a') || target;
+                clickable.click();
+                return;
+              }
+
+              alert('この下書きは保存表示中ですが、現在の画面上で対象チャットを見つけられませんでした。');
             };
 
             item.appendChild(button);
@@ -222,95 +363,84 @@ console.log('[GList] sidebar mode content.js started.');
         return section;
       }
 
-      function looksLikeSidebarContainer(el) {
-        if (!el || !(el instanceof HTMLElement)) return false;
-        if (el.closest(`#${SECTION_ID}`)) return false;
-
-        const text = (el.textContent || '').trim();
-        const style = window.getComputedStyle(el);
-
-        if (style.display === 'none' || style.visibility === 'hidden') return false;
-        if (el.offsetWidth < 180 || el.offsetHeight < 120) return false;
-
-        const signals = [
-          '[role="navigation"]',
-          '[aria-label*="Chat"]',
-          '[aria-label*="チャット"]',
-          '[aria-label*="Spaces"]',
-          '[aria-label*="スペース"]'
-        ];
-
-        if (signals.some((sel) => el.matches(sel))) return true;
-
-        if (
-          text.includes('ダイレクト メッセージ') ||
-          text.includes('スペース') ||
-          text.includes('Direct messages') ||
-          text.includes('Spaces') ||
-          text.includes('チャット')
-        ) {
-          return true;
-        }
-
-        return false;
+      function findShortcutsHeading() {
+        const candidates = Array.from(document.querySelectorAll('span, div, h1, h2, h3, h4, h5'));
+        return candidates.find((el) => isShortcutHeadingText(textOf(el))) || null;
       }
 
-      function findSidebarInsertionPoint() {
-        const directCandidates = [
-          ...document.querySelectorAll('[role="navigation"]'),
-          ...document.querySelectorAll('[aria-label*="チャット"], [aria-label*="Chat"]'),
-          ...document.querySelectorAll('[aria-label*="ダイレクト"], [aria-label*="Direct"]'),
-          ...document.querySelectorAll('[aria-label*="スペース"], [aria-label*="Spaces"]')
-        ];
+      function findShortcutSectionRoot(heading) {
+        if (!heading) return null;
 
-        for (const candidate of directCandidates) {
-          if (looksLikeSidebarContainer(candidate)) {
-            return { type: 'prepend', element: candidate, reason: 'direct-sidebar' };
-          }
+        let current = heading;
+        for (let depth = 0; depth < 7 && current; depth += 1) {
+          const parent = current.parentElement;
+          if (!parent) break;
 
-          const parent = candidate.closest('div');
-          if (looksLikeSidebarContainer(parent)) {
-            return { type: 'prepend', element: parent, reason: 'direct-parent' };
-          }
-        }
+          const text = textOf(parent);
+          const width = parent.offsetWidth;
+          const height = parent.offsetHeight;
 
-        const treeItems = Array.from(document.querySelectorAll('[role="treeitem"], [role="listitem"]'));
-        for (const item of treeItems) {
-          const text = (item.textContent || '').trim();
-          if (
-            text.includes('ダイレクト メッセージ') ||
-            text.includes('スペース') ||
-            text.includes('Direct messages') ||
-            text.includes('Spaces')
-          ) {
-            let parent = item.parentElement;
-            for (let i = 0; i < 6 && parent; i += 1) {
-              if (parent.offsetWidth > 180 && parent.offsetHeight > 120) {
-                return { type: 'prepend', element: parent, reason: 'tree-nearby' };
-              }
-              parent = parent.parentElement;
-            }
+          const hasShortcutHeadingInside = text.includes('ショートカット') || text.includes('Shortcuts');
+          const hasEnoughSize = width >= 180 && height >= 40;
+
+          if (hasShortcutHeadingInside && hasEnoughSize) {
+            current = parent;
+          } else {
+            break;
           }
         }
 
-        const wideDivs = Array.from(document.querySelectorAll('div')).filter((div) => {
-          if (div.id === SECTION_ID) return false;
-          if (div.querySelector(`#${SECTION_ID}`)) return false;
-          if (div.offsetWidth < 180 || div.offsetWidth > 520) return false;
-          if (div.offsetHeight < 150) return false;
+        return current instanceof HTMLElement ? current : null;
+      }
 
-          const text = (div.textContent || '').trim();
+      function findSidebarFallback() {
+        const nav = document.querySelector('[role="navigation"]');
+        if (nav instanceof HTMLElement) return nav;
+
+        const candidates = Array.from(document.querySelectorAll('div')).filter((el) => {
+          const width = el.offsetWidth;
+          const height = el.offsetHeight;
+          const text = textOf(el);
           return (
-            text.includes('ダイレクト メッセージ') ||
-            text.includes('スペース') ||
-            text.includes('Direct messages') ||
-            text.includes('Spaces')
+            width >= 180 &&
+            width <= 500 &&
+            height >= 200 &&
+            (
+              text.includes('ショートカット') ||
+              text.includes('ホーム') ||
+              text.includes('ダイレクト メッセージ') ||
+              text.includes('スペース') ||
+              text.includes('Shortcuts') ||
+              text.includes('Home') ||
+              text.includes('Direct messages') ||
+              text.includes('Spaces')
+            )
           );
         });
 
-        if (wideDivs.length > 0) {
-          wideDivs.sort((a, b) => b.offsetHeight - a.offsetHeight);
-          return { type: 'prepend', element: wideDivs[0], reason: 'wide-fallback' };
+        return candidates[0] || null;
+      }
+
+      function findInsertionTarget() {
+        const shortcutsHeading = findShortcutsHeading();
+        if (shortcutsHeading) {
+          const shortcutRoot = findShortcutSectionRoot(shortcutsHeading);
+          if (shortcutRoot && shortcutRoot.parentElement) {
+            return {
+              type: 'afterend',
+              element: shortcutRoot,
+              reason: 'shortcuts-after'
+            };
+          }
+        }
+
+        const sidebar = findSidebarFallback();
+        if (sidebar) {
+          return {
+            type: 'afterbegin',
+            element: sidebar,
+            reason: 'sidebar-fallback'
+          };
         }
 
         return null;
@@ -319,38 +449,64 @@ console.log('[GList] sidebar mode content.js started.');
       function placeSection(target, section) {
         const existing = document.getElementById(SECTION_ID);
 
-        if (target.type === 'prepend') {
-          if (
-            existing &&
-            existing.parentElement === target.element &&
-            target.element.firstElementChild === existing
-          ) {
-            return;
-          }
-          target.element.insertAdjacentElement('afterbegin', section);
+        if (
+          existing &&
+          existing.parentElement === target.element.parentElement &&
+          target.type === 'afterend' &&
+          existing.previousElementSibling === target.element
+        ) {
           return;
         }
 
-        target.element.appendChild(section);
+        if (
+          existing &&
+          existing.parentElement === target.element &&
+          target.type === 'afterbegin' &&
+          target.element.firstElementChild === existing
+        ) {
+          return;
+        }
+
+        target.element.insertAdjacentElement(target.type, section);
       }
 
-      function updateUI() {
-        const drafts = collectDraftItems();
-        const section = createSection(drafts);
-        const target = findSidebarInsertionPoint();
+      async function updateUI() {
+        if (isUpdating) return;
+        isUpdating = true;
 
-        if (!target) {
-          log('Sidebar insertion point not found yet.');
-          return;
+        try {
+          const liveDrafts = collectDraftItems();
+          if (liveDrafts.length > 0) {
+            await storageSet(CACHE_KEY, makeCachePayload(liveDrafts));
+          }
+
+          const cachedDrafts = await loadCachedDrafts();
+          const drafts = mergeDrafts(liveDrafts, cachedDrafts);
+
+          const section = createSection(drafts, {
+            usingCache: liveDrafts.length === 0 && cachedDrafts.length > 0
+          });
+
+          const target = findInsertionTarget();
+          if (!target) {
+            log('Insertion target not found yet.');
+            return;
+          }
+
+          placeSection(target, section);
+          log('Section inserted:', target.reason, 'live=', liveDrafts.length, 'cached=', cachedDrafts.length);
+        } catch (err) {
+          console.error('[GList] updateUI failed:', err);
+        } finally {
+          isUpdating = false;
         }
-
-        placeSection(target, section);
-        log('Sidebar section inserted.', target.reason, 'drafts=', drafts.length);
       }
 
       function scheduleUpdate() {
         if (updateTimer) clearTimeout(updateTimer);
-        updateTimer = setTimeout(updateUI, UPDATE_DEBOUNCE_MS);
+        updateTimer = setTimeout(() => {
+          updateUI();
+        }, UPDATE_DEBOUNCE_MS);
       }
 
       const observer = new MutationObserver((mutations) => {
