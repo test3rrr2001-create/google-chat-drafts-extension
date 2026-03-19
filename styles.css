@@ -114,6 +114,15 @@
   display: block;
 }
 
+.gchat-draft-cache-note {
+  margin: 0 4px 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #5f6368;
+  background: rgba(0, 0, 0, 0.04);
+}
+
 .gchat-draft-empty {
   padding: 10px 10px 12px;
   font-size: 13px;
@@ -165,6 +174,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.gchat-draft-cached-tag {
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(26, 115, 232, 0.12);
+  color: #1a73e8;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 [data-theme='dark'] .gchat-draft-sidebar-title,
@@ -172,8 +193,13 @@
   color: #e8eaed;
 }
 
-[data-theme='dark'] .gchat-draft-empty {
+[data-theme='dark'] .gchat-draft-empty,
+[data-theme='dark'] .gchat-draft-cache-note {
   color: #bdc1c6;
+}
+
+[data-theme='dark'] .gchat-draft-cache-note {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 [data-theme='dark'] .gchat-draft-chevron-svg {
@@ -186,8 +212,13 @@
     color: #e8eaed;
   }
 
-  .gchat-draft-empty {
+  .gchat-draft-empty,
+  .gchat-draft-cache-note {
     color: #bdc1c6;
+  }
+
+  .gchat-draft-cache-note {
+    background: rgba(255, 255, 255, 0.06);
   }
 
   .gchat-draft-chevron-svg {
