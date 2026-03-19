@@ -1,4 +1,4 @@
-console.log('[GList] sidebar mode content.js started.');
+console.log('[GList] personal-section mode content.js started.');
 
 (() => {
   'use strict';
@@ -6,18 +6,20 @@ console.log('[GList] sidebar mode content.js started.');
   const DEBUG = true;
   const log = (...args) => DEBUG && console.log('[GList]', ...args);
 
-  const SECTION_ID = 'gchat-draft-sidebar-section';
-  const CACHE_KEY = 'gchatDraftCacheV1';
+  const SECTION_ID = 'gchat-draft-personal-section';
+  const CACHE_KEY = 'gchatDraftCacheV2';
+  const ENABLED_KEY = 'gchatDraftFeatureEnabledV1';
   const CACHE_TTL_MS = 30 * 60 * 1000;
   const UPDATE_DEBOUNCE_MS = 300;
 
   let updateTimer = null;
-  let isExpanded = true;
+  let isExpanded = false;
   let isUpdating = false;
+  let featureEnabled = true;
 
   function startExtension() {
     try {
-      log('Extension initialized. Version 2.1 (Shortcuts + Cache)');
+      log('Extension initialized. Version 3.0 (Personal Section Top + Toggle)');
 
       function normalizeName(name) {
         return (name || '')
@@ -27,39 +29,85 @@ console.log('[GList] sidebar mode content.js started.');
           .trim();
       }
 
-      function createPencilSvg() {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('aria-hidden', 'true');
-
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute(
-          'd',
-          'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z'
-        );
-        svg.appendChild(path);
-        return svg;
-      }
-
-      function createChevronSvg(expanded) {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('aria-hidden', 'true');
-        svg.classList.add('gchat-draft-chevron-svg');
-        if (expanded) svg.classList.add('expanded');
-
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z');
-        svg.appendChild(path);
-        return svg;
-      }
-
       function textOf(el) {
         return (el?.textContent || '').trim();
       }
 
-      function isShortcutHeadingText(text) {
-        return text === 'ショートカット' || text === 'Shortcuts';
+      function createSvg(pathD, className = '') {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        if (className) svg.setAttribute('class', className);
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathD);
+        svg.appendChild(path);
+
+        return svg;
+      }
+
+      function createPencilSvg() {
+        return createSvg(
+          'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z'
+        );
+      }
+
+      function createChevronSvg(expanded) {
+        const svg = createSvg('M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z', 'gchat-draft-chevron-svg');
+        if (expanded) svg.classList.add('expanded');
+        return svg;
+      }
+
+      async function storageGet(key) {
+        try {
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            return await new Promise((resolve) => {
+              chrome.storage.local.get([key], (result) => resolve(result?.[key]));
+            });
+          }
+        } catch (err) {
+          log('chrome.storage get failed, fallback localStorage', err);
+        }
+
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+
+      async function storageSet(key, value) {
+        try {
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            await new Promise((resolve) => {
+              chrome.storage.local.set({ [key]: value }, () => resolve());
+            });
+            return;
+          }
+        } catch (err) {
+          log('chrome.storage set failed, fallback localStorage', err);
+        }
+
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (err) {
+          log('localStorage set failed', err);
+        }
+      }
+
+      async function loadFeatureEnabled() {
+        const stored = await storageGet(ENABLED_KEY);
+        if (typeof stored === 'boolean') {
+          featureEnabled = stored;
+        } else {
+          featureEnabled = true;
+        }
+      }
+
+      async function setFeatureEnabled(value) {
+        featureEnabled = !!value;
+        await storageSet(ENABLED_KEY, featureEnabled);
       }
 
       function collectDraftItems() {
@@ -137,56 +185,16 @@ console.log('[GList] sidebar mode content.js started.');
         return drafts;
       }
 
-      async function storageGet(key) {
-        try {
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            return await new Promise((resolve) => {
-              chrome.storage.local.get([key], (result) => resolve(result?.[key]));
-            });
-          }
-        } catch (err) {
-          log('chrome.storage get failed, fallback to localStorage', err);
-        }
-
-        try {
-          const raw = localStorage.getItem(key);
-          return raw ? JSON.parse(raw) : null;
-        } catch {
-          return null;
-        }
-      }
-
-      async function storageSet(key, value) {
-        try {
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            await new Promise((resolve) => {
-              chrome.storage.local.set({ [key]: value }, () => resolve());
-            });
-            return;
-          }
-        } catch (err) {
-          log('chrome.storage set failed, fallback to localStorage', err);
-        }
-
-        try {
-          localStorage.setItem(key, JSON.stringify(value));
-        } catch (err) {
-          log('localStorage set failed', err);
-        }
-      }
-
       function makeCachePayload(drafts) {
         return {
           savedAt: Date.now(),
-          items: drafts.map((d) => ({
-            name: d.name
-          }))
+          items: drafts.map((d) => ({ name: d.name }))
         };
       }
 
       async function loadCachedDrafts() {
         const payload = await storageGet(CACHE_KEY);
-        if (!payload || !Array.isArray(payload.items) || !payload.savedAt) return [];
+        if (!payload || !payload.savedAt || !Array.isArray(payload.items)) return [];
 
         const age = Date.now() - payload.savedAt;
         if (age > CACHE_TTL_MS) return [];
@@ -194,8 +202,8 @@ console.log('[GList] sidebar mode content.js started.');
         return payload.items
           .map((item) => ({
             name: item.name,
-            cached: true,
-            element: null
+            element: null,
+            cached: true
           }))
           .filter((item) => item.name);
       }
@@ -204,17 +212,17 @@ console.log('[GList] sidebar mode content.js started.');
         const merged = [];
         const seen = new Set();
 
-        for (const item of liveDrafts) {
-          if (!seen.has(item.name)) {
-            merged.push(item);
-            seen.add(item.name);
+        for (const draft of liveDrafts) {
+          if (!seen.has(draft.name)) {
+            merged.push(draft);
+            seen.add(draft.name);
           }
         }
 
-        for (const item of cachedDrafts) {
-          if (!seen.has(item.name)) {
-            merged.push(item);
-            seen.add(item.name);
+        for (const draft of cachedDrafts) {
+          if (!seen.has(draft.name)) {
+            merged.push(draft);
+            seen.add(draft.name);
           }
         }
 
@@ -230,160 +238,38 @@ console.log('[GList] sidebar mode content.js started.');
           candidates.find((el) => {
             const label = normalizeName(
               el.getAttribute('aria-label') ||
-                el.getAttribute('title') ||
-                textOf(el)
+              el.getAttribute('title') ||
+              textOf(el)
             );
             return label && label.includes(name);
           }) || null
         );
       }
 
-      function createSection(drafts, meta = {}) {
-        let section = document.getElementById(SECTION_ID);
-        if (!section) {
-          section = document.createElement('section');
-          section.id = SECTION_ID;
-          section.setAttribute('data-gchat-draft-sidebar', 'true');
-        } else {
-          section.innerHTML = '';
-        }
-
-        const header = document.createElement('button');
-        header.type = 'button';
-        header.className = 'gchat-draft-sidebar-header';
-
-        const left = document.createElement('div');
-        left.className = 'gchat-draft-sidebar-header-left';
-
-        const iconWrap = document.createElement('span');
-        iconWrap.className = 'gchat-draft-sidebar-icon';
-        iconWrap.appendChild(createPencilSvg());
-
-        const title = document.createElement('span');
-        title.className = 'gchat-draft-sidebar-title';
-        title.textContent = '下書き';
-
-        left.appendChild(iconWrap);
-        left.appendChild(title);
-
-        const right = document.createElement('div');
-        right.className = 'gchat-draft-sidebar-header-right';
-
-        const count = document.createElement('span');
-        count.className = 'gchat-draft-sidebar-count';
-        count.textContent = String(drafts.length);
-
-        const chevron = createChevronSvg(isExpanded);
-
-        right.appendChild(count);
-        right.appendChild(chevron);
-
-        header.appendChild(left);
-        header.appendChild(right);
-
-        header.onclick = (e) => {
-          e.stopPropagation();
-          isExpanded = !isExpanded;
-          scheduleUpdate();
-        };
-
-        section.appendChild(header);
-
-        const body = document.createElement('div');
-        body.className = 'gchat-draft-sidebar-body';
-        if (isExpanded) body.classList.add('expanded');
-
-        if (meta.usingCache) {
-          const note = document.createElement('div');
-          note.className = 'gchat-draft-cache-note';
-          note.textContent = '保存済みの下書きを表示中';
-          body.appendChild(note);
-        }
-
-        if (drafts.length === 0) {
-          const empty = document.createElement('div');
-          empty.className = 'gchat-draft-empty';
-          empty.textContent = '未送信の下書きはありません';
-          body.appendChild(empty);
-        } else {
-          const list = document.createElement('ul');
-          list.className = 'gchat-draft-list';
-
-          for (const draft of drafts) {
-            const item = document.createElement('li');
-            item.className = 'gchat-draft-list-item';
-
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'gchat-draft-list-button';
-            button.title = draft.cached ? `${draft.name}（保存済み）` : draft.name;
-
-            const dot = document.createElement('span');
-            dot.className = 'gchat-draft-list-dot';
-
-            const label = document.createElement('span');
-            label.className = 'gchat-draft-list-label';
-            label.textContent = draft.name;
-
-            button.appendChild(dot);
-            button.appendChild(label);
-
-            if (draft.cached) {
-              const tag = document.createElement('span');
-              tag.className = 'gchat-draft-cached-tag';
-              tag.textContent = '保存';
-              button.appendChild(tag);
-            }
-
-            button.onclick = (e) => {
-              e.stopPropagation();
-
-              const target =
-                draft.element ||
-                findLiveChatByName(draft.name);
-
-              if (target) {
-                const clickable = target.querySelector('a') || target;
-                clickable.click();
-                return;
-              }
-
-              alert('この下書きは保存表示中ですが、現在の画面上で対象チャットを見つけられませんでした。');
-            };
-
-            item.appendChild(button);
-            list.appendChild(item);
-          }
-
-          body.appendChild(list);
-        }
-
-        section.appendChild(body);
-
-        return section;
+      function isPersonalHeading(text) {
+        return text === '自分専用' || text === 'Personal' || text === 'Assigned to me';
       }
 
-      function findShortcutsHeading() {
-        const candidates = Array.from(document.querySelectorAll('span, div, h1, h2, h3, h4, h5'));
-        return candidates.find((el) => isShortcutHeadingText(textOf(el))) || null;
+      function findPersonalHeading() {
+        const nodes = Array.from(document.querySelectorAll('span, div, h1, h2, h3, h4, h5'));
+        return nodes.find((el) => isPersonalHeading(textOf(el))) || null;
       }
 
-      function findShortcutSectionRoot(heading) {
+      function findHeaderRowForHeading(heading) {
         if (!heading) return null;
 
         let current = heading;
-        for (let depth = 0; depth < 7 && current; depth += 1) {
+        for (let i = 0; i < 6 && current; i += 1) {
           const parent = current.parentElement;
           if (!parent) break;
 
-          const text = textOf(parent);
+          const parentText = textOf(parent);
           const width = parent.offsetWidth;
-          const height = parent.offsetHeight;
 
-          const hasShortcutHeadingInside = text.includes('ショートカット') || text.includes('Shortcuts');
-          const hasEnoughSize = width >= 180 && height >= 40;
-
-          if (hasShortcutHeadingInside && hasEnoughSize) {
+          if (
+            width >= 160 &&
+            parentText.includes(textOf(heading))
+          ) {
             current = parent;
           } else {
             break;
@@ -393,57 +279,197 @@ console.log('[GList] sidebar mode content.js started.');
         return current instanceof HTMLElement ? current : null;
       }
 
-      function findSidebarFallback() {
-        const nav = document.querySelector('[role="navigation"]');
-        if (nav instanceof HTMLElement) return nav;
-
-        const candidates = Array.from(document.querySelectorAll('div')).filter((el) => {
-          const width = el.offsetWidth;
-          const height = el.offsetHeight;
-          const text = textOf(el);
-          return (
-            width >= 180 &&
-            width <= 500 &&
-            height >= 200 &&
-            (
-              text.includes('ショートカット') ||
-              text.includes('ホーム') ||
-              text.includes('ダイレクト メッセージ') ||
-              text.includes('スペース') ||
-              text.includes('Shortcuts') ||
-              text.includes('Home') ||
-              text.includes('Direct messages') ||
-              text.includes('Spaces')
-            )
-          );
-        });
-
-        return candidates[0] || null;
-      }
-
-      function findInsertionTarget() {
-        const shortcutsHeading = findShortcutsHeading();
-        if (shortcutsHeading) {
-          const shortcutRoot = findShortcutSectionRoot(shortcutsHeading);
-          if (shortcutRoot && shortcutRoot.parentElement) {
+      function findPersonalInsertionTarget() {
+        const heading = findPersonalHeading();
+        if (heading) {
+          const headerRow = findHeaderRowForHeading(heading);
+          if (headerRow?.parentElement) {
             return {
               type: 'afterend',
-              element: shortcutRoot,
-              reason: 'shortcuts-after'
+              element: headerRow,
+              reason: 'personal-header-after'
             };
           }
         }
 
-        const sidebar = findSidebarFallback();
-        if (sidebar) {
+        const nav = document.querySelector('[role="navigation"]');
+        if (nav instanceof HTMLElement) {
           return {
             type: 'afterbegin',
-            element: sidebar,
-            reason: 'sidebar-fallback'
+            element: nav,
+            reason: 'navigation-fallback'
           };
         }
 
         return null;
+      }
+
+      function createToggle(enabled) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'gchat-draft-toggle';
+        if (enabled) button.classList.add('enabled');
+        button.setAttribute('aria-label', enabled ? '下書き機能 ON' : '下書き機能 OFF');
+        button.setAttribute('title', enabled ? '下書き機能 ON' : '下書き機能 OFF');
+
+        const knob = document.createElement('span');
+        knob.className = 'gchat-draft-toggle-knob';
+
+        button.appendChild(knob);
+        return button;
+      }
+
+      function createSection(drafts, meta = {}) {
+        let section = document.getElementById(SECTION_ID);
+        if (!section) {
+          section = document.createElement('section');
+          section.id = SECTION_ID;
+          section.setAttribute('data-gchat-draft-personal', 'true');
+        } else {
+          section.innerHTML = '';
+        }
+
+        if (!featureEnabled) {
+          isExpanded = false;
+        }
+
+        const row = document.createElement('div');
+        row.className = 'gchat-draft-row';
+        if (!featureEnabled) row.classList.add('disabled');
+
+        const mainButton = document.createElement('button');
+        mainButton.type = 'button';
+        mainButton.className = 'gchat-draft-row-main';
+
+        const icon = document.createElement('span');
+        icon.className = 'gchat-draft-row-icon';
+        icon.appendChild(createPencilSvg());
+
+        const labelWrap = document.createElement('div');
+        labelWrap.className = 'gchat-draft-row-label-wrap';
+
+        const title = document.createElement('div');
+        title.className = 'gchat-draft-row-title';
+        title.textContent = '下書き';
+
+        const subtitle = document.createElement('div');
+        subtitle.className = 'gchat-draft-row-subtitle';
+
+        if (!featureEnabled) {
+          subtitle.textContent = 'OFF';
+        } else if (meta.usingCache) {
+          subtitle.textContent = '保存済みを表示中';
+        } else {
+          subtitle.textContent = drafts.length > 0 ? `${drafts.length}件の下書き` : '下書きなし';
+        }
+
+        labelWrap.appendChild(title);
+        labelWrap.appendChild(subtitle);
+
+        const right = document.createElement('div');
+        right.className = 'gchat-draft-row-right';
+
+        if (featureEnabled) {
+          const badge = document.createElement('span');
+          badge.className = 'gchat-draft-row-badge';
+          badge.textContent = String(drafts.length);
+          right.appendChild(badge);
+        }
+
+        const chevron = createChevronSvg(featureEnabled && isExpanded);
+        right.appendChild(chevron);
+
+        mainButton.appendChild(icon);
+        mainButton.appendChild(labelWrap);
+        mainButton.appendChild(right);
+
+        mainButton.onclick = (e) => {
+          e.stopPropagation();
+          if (!featureEnabled) return;
+          isExpanded = !isExpanded;
+          scheduleUpdate();
+        };
+
+        const toggle = createToggle(featureEnabled);
+        toggle.onclick = async (e) => {
+          e.stopPropagation();
+          await setFeatureEnabled(!featureEnabled);
+          scheduleUpdate();
+        };
+
+        row.appendChild(mainButton);
+        row.appendChild(toggle);
+        section.appendChild(row);
+
+        const body = document.createElement('div');
+        body.className = 'gchat-draft-panel';
+        if (featureEnabled && isExpanded) body.classList.add('expanded');
+
+        if (featureEnabled) {
+          if (drafts.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'gchat-draft-empty';
+            empty.textContent = '未送信の下書きはありません';
+            body.appendChild(empty);
+          } else {
+            const list = document.createElement('ul');
+            list.className = 'gchat-draft-list';
+
+            for (const draft of drafts) {
+              const li = document.createElement('li');
+              li.className = 'gchat-draft-list-item';
+
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'gchat-draft-list-button';
+              button.title = draft.cached ? `${draft.name}（保存済み）` : draft.name;
+
+              const dot = document.createElement('span');
+              dot.className = 'gchat-draft-list-dot';
+
+              const label = document.createElement('span');
+              label.className = 'gchat-draft-list-label';
+              label.textContent = draft.name;
+
+              button.appendChild(dot);
+              button.appendChild(label);
+
+              if (draft.cached) {
+                const tag = document.createElement('span');
+                tag.className = 'gchat-draft-cached-tag';
+                tag.textContent = '保存';
+                button.appendChild(tag);
+              }
+
+              button.onclick = (e) => {
+                e.stopPropagation();
+
+                const target = draft.element || findLiveChatByName(draft.name);
+                if (target) {
+                  const clickable = target.querySelector('a') || target;
+                  clickable.click();
+                  return;
+                }
+
+                alert('保存済み下書きはありますが、現在の画面上で対象チャットを見つけられませんでした。');
+              };
+
+              li.appendChild(button);
+              list.appendChild(li);
+            }
+
+            body.appendChild(list);
+          }
+        } else {
+          const note = document.createElement('div');
+          note.className = 'gchat-draft-empty';
+          note.textContent = '下書き機能は OFF です';
+          body.appendChild(note);
+        }
+
+        section.appendChild(body);
+
+        return section;
       }
 
       function placeSection(target, section) {
@@ -451,7 +477,6 @@ console.log('[GList] sidebar mode content.js started.');
 
         if (
           existing &&
-          existing.parentElement === target.element.parentElement &&
           target.type === 'afterend' &&
           existing.previousElementSibling === target.element
         ) {
@@ -460,8 +485,8 @@ console.log('[GList] sidebar mode content.js started.');
 
         if (
           existing &&
-          existing.parentElement === target.element &&
           target.type === 'afterbegin' &&
+          existing.parentElement === target.element &&
           target.element.firstElementChild === existing
         ) {
           return;
@@ -475,6 +500,8 @@ console.log('[GList] sidebar mode content.js started.');
         isUpdating = true;
 
         try {
+          await loadFeatureEnabled();
+
           const liveDrafts = collectDraftItems();
           if (liveDrafts.length > 0) {
             await storageSet(CACHE_KEY, makeCachePayload(liveDrafts));
@@ -487,14 +514,14 @@ console.log('[GList] sidebar mode content.js started.');
             usingCache: liveDrafts.length === 0 && cachedDrafts.length > 0
           });
 
-          const target = findInsertionTarget();
+          const target = findPersonalInsertionTarget();
           if (!target) {
-            log('Insertion target not found yet.');
+            log('Personal insertion target not found yet.');
             return;
           }
 
           placeSection(target, section);
-          log('Section inserted:', target.reason, 'live=', liveDrafts.length, 'cached=', cachedDrafts.length);
+          log('Section inserted:', target.reason, 'drafts=', drafts.length, 'enabled=', featureEnabled);
         } catch (err) {
           console.error('[GList] updateUI failed:', err);
         } finally {
