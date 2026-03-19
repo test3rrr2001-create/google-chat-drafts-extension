@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Google Chat Draft List",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Google Chatのサイドバーに未送信の下書きがあるチャット一覧を表示します。",
   "permissions": ["storage"],
   "content_scripts": [
